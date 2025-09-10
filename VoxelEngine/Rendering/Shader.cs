@@ -1,90 +1,55 @@
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 
-namespace VoxelEngine.Rendering;
-
-public class Shader : IDisposable
+namespace VoxelEngine.Rendering
 {
-    public int Handle { get; private set; }
-    private bool _disposed = false;
-
-    public Shader(string vertexSource, string fragmentSource)
+    public class Shader
     {
-        int vertexShader = GL.CreateShader(ShaderType.VertexShader);
-        GL.ShaderSource(vertexShader, vertexSource);
-        GL.CompileShader(vertexShader);
+        private readonly int _handle;
 
-        GL.GetShader(vertexShader, ShaderParameter.CompileStatus, out int vertexSuccess);
-        if (vertexSuccess == 0)
+        public Shader(string vertexSource, string fragmentSource)
         {
-            string infoLog = GL.GetShaderInfoLog(vertexShader);
-            throw new Exception($"Error compiling vertex shader: {infoLog}");
+            _handle = GL.CreateProgram();
+
+            int vertexShader = CompileShader(vertexSource, ShaderType.VertexShader);
+            int fragmentShader = CompileShader(fragmentSource, ShaderType.FragmentShader);
+
+            GL.AttachShader(_handle, vertexShader);
+            GL.AttachShader(_handle, fragmentShader);
+
+            GL.LinkProgram(_handle);
+
+            GL.DetachShader(_handle, vertexShader);
+            GL.DetachShader(_handle, fragmentShader);
+            GL.DeleteShader(vertexShader);
+            GL.DeleteShader(fragmentShader);
         }
 
-        int fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
-        GL.ShaderSource(fragmentShader, fragmentSource);
-        GL.CompileShader(fragmentShader);
-
-        GL.GetShader(fragmentShader, ShaderParameter.CompileStatus, out int fragmentSuccess);
-        if (fragmentSuccess == 0)
+        private static int CompileShader(string source, ShaderType type)
         {
-            string infoLog = GL.GetShaderInfoLog(fragmentShader);
-            throw new Exception($"Error compiling fragment shader: {infoLog}");
+            int shader = GL.CreateShader(type);
+            GL.ShaderSource(shader, source);
+            GL.CompileShader(shader);
+
+            GL.GetShader(shader, ShaderParameter.CompileStatus, out int status);
+            if (status == 0)
+            {
+                string infoLog = GL.GetShaderInfoLog(shader);
+                System.Console.WriteLine($"Shader compile error: {infoLog}");
+            }
+
+            return shader;
         }
 
-        Handle = GL.CreateProgram();
-        GL.AttachShader(Handle, vertexShader);
-        GL.AttachShader(Handle, fragmentShader);
-        GL.LinkProgram(Handle);
-
-        GL.GetProgram(Handle, GetProgramParameterName.LinkStatus, out int linkSuccess);
-        if (linkSuccess == 0)
+        public void Use()
         {
-            string infoLog = GL.GetProgramInfoLog(Handle);
-            throw new Exception($"Error linking shader program: {infoLog}");
+            GL.UseProgram(_handle);
         }
 
-        GL.DetachShader(Handle, vertexShader);
-        GL.DetachShader(Handle, fragmentShader);
-        GL.DeleteShader(vertexShader);
-        GL.DeleteShader(fragmentShader);
-    }
-
-    public void Use()
-    {
-        GL.UseProgram(Handle);
-    }
-
-    public void SetInt(string name, int value)
-    {
-        int location = GL.GetUniformLocation(Handle, name);
-        GL.Uniform1(location, value);
-    }
-
-    public void SetFloat(string name, float value)
-    {
-        int location = GL.GetUniformLocation(Handle, name);
-        GL.Uniform1(location, value);
-    }
-
-    public void SetVector3(string name, Vector3 value)
-    {
-        int location = GL.GetUniformLocation(Handle, name);
-        GL.Uniform3(location, value);
-    }
-
-    public void SetMatrix4(string name, Matrix4 matrix)
-    {
-        int location = GL.GetUniformLocation(Handle, name);
-        GL.UniformMatrix4(location, false, ref matrix);
-    }
-
-    public void Dispose()
-    {
-        if (!_disposed)
+        public void SetMatrix4(string name, Matrix4 matrix)
         {
-            GL.DeleteProgram(Handle);
-            _disposed = true;
+            int location = GL.GetUniformLocation(_handle, name);
+            GL.UniformMatrix4(location, false, ref matrix);
         }
     }
 }

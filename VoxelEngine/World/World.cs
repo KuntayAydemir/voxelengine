@@ -2,79 +2,63 @@ using System.Collections.Generic;
 using OpenTK.Mathematics;
 using VoxelEngine.Rendering;
 
-namespace VoxelEngine.World;
-
-public class GameWorld  // World yerine GameWorld (namespace çakışmasını önlemek için)
+namespace VoxelEngine.World
 {
-    private int _seed;
-    private Dictionary<(int, int), Chunk> _chunks = new();
-
-    public GameWorld(int seed)
+    public class GameWorld
     {
-        _seed = seed;
+        public List<Chunk> Chunks = new();
 
-        // Örnek olarak 3x3 chunk oluştur
-        for (int x = 0; x < 3; x++)
+        public GameWorld()
         {
-            for (int z = 0; z < 3; z++)
+            GenerateChunks();
+        }
+
+        public void GenerateChunks()
+        {
+            for (int x = -1; x <= 1; x++)
             {
-                // Chunk constructor'ına göre uyarlayın:
-                // Vector3 bekliyorsa:
-                _chunks[(x, z)] = new Chunk(new Vector3(x, 0, z));
-                
-                // Vector2i bekliyorsa (ve Chunk bunu destekliyorsa):
-                // _chunks[(x, z)] = new Chunk(new Vector2i(x, z));
+                for (int z = -1; z <= 1; z++)
+                {
+                    var chunk = new Chunk(new Vector3(x * 16, 0, z * 16));
+                    Chunks.Add(chunk);
+                }
             }
         }
-    }
 
-    public void Update(Vector3 playerPosition)
-    {
-        foreach (var chunk in _chunks.Values)
+        public BlockType GetBlock(Vector3 position)
         {
-            // Chunk mesh güncelleme (eğer gerekiyorsa)
-            // chunk.UpdateMesh() çağrısı Chunk.Render() içinde yapılıyor
-        }
-    }
+            int chunkX = (int)Math.Floor(position.X / 16);
+            int chunkZ = (int)Math.Floor(position.Z / 16);
 
-    public void Render(Shader shader, Matrix4 view, Matrix4 projection)
-    {
-        shader.Use();
-        shader.SetMatrix4("view", view);
-        shader.SetMatrix4("projection", projection);
-                
-        foreach (var chunk in _chunks.Values)
-        {
-            chunk.Render(shader);  // Shader parametresini ekledik
-        }
-    }
+            var chunk = Chunks.Find(c =>
+                c.Position.X == chunkX * 16 &&
+                c.Position.Z == chunkZ * 16);
 
-    // PlayerPhysics tarafından kullanılacak GetBlock metodu
-    public BlockType GetBlock(int worldX, int worldY, int worldZ)
-    {
-        int chunkX = worldX / Chunk.ChunkSize;
-        int chunkZ = worldZ / Chunk.ChunkSize;
+            if (chunk == null) return BlockType.Air;
 
-        int localX = worldX % Chunk.ChunkSize;
-        int localZ = worldZ % Chunk.ChunkSize;
+            int localX = (int)(position.X - chunk.Position.X);
+            int localY = (int)position.Y;
+            int localZ = (int)(position.Z - chunk.Position.Z);
 
-        // Negative coordinates için düzeltme
-        if (worldX < 0)
-        {
-            chunkX = (worldX + 1) / Chunk.ChunkSize - 1;
-            localX = worldX - chunkX * Chunk.ChunkSize;
-        }
-        if (worldZ < 0)
-        {
-            chunkZ = (worldZ + 1) / Chunk.ChunkSize - 1;
-            localZ = worldZ - chunkZ * Chunk.ChunkSize;
+            if (localX < 0 || localX >= Chunk.ChunkSize ||
+                localY < 0 || localY >= Chunk.ChunkHeight ||
+                localZ < 0 || localZ >= Chunk.ChunkSize)
+                return BlockType.Air;
+
+            return chunk.GetBlock(localX, localY, localZ);
         }
 
-        if (_chunks.TryGetValue((chunkX, chunkZ), out var chunk))
+        public void Update(float deltaTime)
         {
-            return chunk.GetBlock(localX, worldY, localZ);
+            // Boş — sonra eklenebilir
         }
 
-        return BlockType.Air;
+        public void Render(Shader shader)
+        {
+            foreach (var chunk in Chunks)
+            {
+                chunk.Render(shader);
+            }
+        }
     }
 }
