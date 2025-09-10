@@ -18,14 +18,19 @@ namespace VoxelEngine.Core
 
         private double _fpsTimer = 0.0;
         private int _frameCounter = 0;
+        private bool _wireframeMode = false;
 
         public GameWindow() : base(
-            GameWindowSettings.Default,
+            new GameWindowSettings()
+            {
+                UpdateFrequency = 60.0
+            },
             new NativeWindowSettings()
             {
                 ClientSize = (1920, 1080),
                 Title = "Voxel Engine",
-                Flags = ContextFlags.ForwardCompatible
+                Flags = ContextFlags.ForwardCompatible,
+                Vsync = VSyncMode.On // VSync aktif
             })
         {
         }
@@ -36,6 +41,8 @@ namespace VoxelEngine.Core
 
             GL.ClearColor(0.2f, 0.3f, 0.3f, 1.0f);
             GL.Enable(EnableCap.DepthTest);
+            GL.Enable(EnableCap.CullFace);
+            GL.CullFace(CullFaceMode.Back);
 
             _camera = new Camera();
             _world = new GameWorld();
@@ -55,7 +62,7 @@ namespace VoxelEngine.Core
             HandleInput(e);
 
             _player.Update((float)e.Time);
-            _world.Update((float)e.Time);
+            _world.Update((float)e.Time, _player.Position);
 
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
@@ -69,7 +76,8 @@ namespace VoxelEngine.Core
                 int fps = _frameCounter;
                 _frameCounter = 0;
                 _fpsTimer = 0.0;
-                Title = $"Voxel Engine | FPS: {fps} | Chunks: {_world.Chunks.Count} | Mode: {_player.Mode} | Pos: {_player.Position.X:F1}, {_player.Position.Y:F1}, {_player.Position.Z:F1}";
+                string wireframeText = _wireframeMode ? " | Wireframe: ON" : "";
+                Title = $"Voxel Engine | FPS: {fps} | Chunks: {_world.Chunks.Count} | Mode: {_player.Mode} | Pos: {_player.Position.X:F1}, {_player.Position.Y:F1}, {_player.Position.Z:F1}{wireframeText}";
             }
 
             SwapBuffers();
@@ -122,6 +130,22 @@ namespace VoxelEngine.Core
             if (keyboardState.IsKeyPressed(Keys.F10))
             {
                 _player.ToggleMode();
+            }
+            
+            // Wireframe toggle
+            if (keyboardState.IsKeyPressed(Keys.F1))
+            {
+                _wireframeMode = !_wireframeMode;
+                if (_wireframeMode)
+                {
+                    GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
+                    GL.Disable(EnableCap.CullFace);
+                }
+                else
+                {
+                    GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+                    GL.Enable(EnableCap.CullFace);
+                }
             }
 
             // Basit mouse-look

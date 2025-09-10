@@ -19,16 +19,24 @@ public class Chunk
     private bool _meshNeedsUpdate = true;
     private List<float> _vertices = new List<float>();
 
-    public Chunk(Vector2i position)
+    public Chunk(Vector2i position, bool generateMeshImmediately = true)
     {
         Position = position;
         _blocks = new BlockType[ChunkSize, ChunkHeight, ChunkSize];
         
-        // Generate OpenGL buffers
-        _vao = GL.GenVertexArray();
-        _vbo = GL.GenBuffer();
+        if (generateMeshImmediately)
+        {
+            // Generate OpenGL buffers (main thread only)
+            _vao = GL.GenVertexArray();
+            _vbo = GL.GenBuffer();
+        }
         
         GenerateTerrain();
+        
+        if (!generateMeshImmediately)
+        {
+            _meshNeedsUpdate = true; // Mesh daha sonra oluşturulacak
+        }
     }
 
     public BlockType GetBlock(int x, int y, int z)
@@ -50,42 +58,66 @@ public class Chunk
 
     private void GenerateTerrain()
     {
-        // Düz dünya jenerasyonu - basit düz zemin
-        const int groundLevel = 50;
+        // Prosedürel dünya oluşumu - Perlin noise ile height variation
+        const int baseGroundLevel = 50;
+        const double noiseScale = 0.02; // Ne kadar 'zoomed in' noise
+        const int heightVariation = 15; // Maks yükseklik farkı
         
         for (int x = 0; x < ChunkSize; x++)
         {
             for (int z = 0; z < ChunkSize; z++)
             {
-                for (int y = 0; y <= groundLevel && y < ChunkHeight; y++)
+                // Dünya koordinatlarını al
+                double worldX = Position.X * ChunkSize + x;
+                double worldZ = Position.Y * ChunkSize + z;
+                
+                // Perlin noise ile yükseklik hesapla
+                double noiseValue = PerlinNoise.OctaveNoise(worldX, 0, worldZ, 4, 0.5, noiseScale);
+                int height = baseGroundLevel + (int)(noiseValue * heightVariation);
+                
+                // Blokları yerleştir
+                for (int y = 0; y <= height && y < ChunkHeight; y++)
                 {
-                    if (y < groundLevel - 5)
-                        _blocks[x, y, z] = BlockType.Stone;
-                    else if (y < groundLevel)
-                        _blocks[x, y, z] = BlockType.Dirt;
-                    else if (y == groundLevel)
-                        _blocks[x, y, z] = BlockType.Grass;
-                    // y > groundLevel = Air (default)
+                    if (y < height - 5)
+                        SetBlock(x, y, z, BlockType.Stone);
+                    else if (y < height)
+                        SetBlock(x, y, z, BlockType.Dirt);
+                    else if (y == height)
+                        SetBlock(x, y, z, BlockType.Grass);
+                }
+                
+                // Basit biome sistemi - yüksekliğe göre
+                if (height > baseGroundLevel + 8)
+                {
+                    // Dağlık bölge - taş çıkıntıları
+                    if (height < ChunkHeight - 1 && noiseValue > 0.3)
+                        SetBlock(x, height + 1, z, BlockType.Stone);
                 }
             }
         }
         _meshNeedsUpdate = true;
     }
 
-    public void UpdateMesh()
+    private void UpdateMesh()
     {
         if (!_meshNeedsUpdate) return;
 
         _vertices.Clear();
+        int solidBlocks = 0;
 
-        for (int x = 0; x < ChunkSize; x++)
+        // Hemen şimdi basit fix - tüm y seviyelerini tara ama optimize et
+        int maxY = 100; // Çoğu terrain bu seviyenin altında
+        
+        for (int y = 0; y < maxY; y++)
         {
-            for (int y = 0; y < ChunkHeight; y++)
+            for (int x = 0; x < ChunkSize; x++)
             {
                 for (int z = 0; z < ChunkSize; z++)
                 {
-                    BlockType block = _blocks[x, y, z];
+                    BlockType block = GetBlock(x, y, z);
                     if (block == BlockType.Air) continue;
+                    
+                    solidBlocks++;
 
                     Vector3 worldPos = new Vector3(
                         Position.X * ChunkSize + x,
@@ -215,31 +247,46 @@ public class Chunk
 
     private void UpdateBuffers()
     {
+        // Lazy OpenGL buffer initialization
+        if (_vao == 0)
+        {
+            _vao = GL.GenVertexArray();
+            _vbo = GL.GenBuffer();
+        }
+        
         GL.BindVertexArray(_vao);
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
         
         // Vertex format: position(3) + texCoord(2) + normal(3) + blockType(1) = 9 floats per vertex
-        GL.BufferData(BufferTarget.ArrayBuffer, _vertices.Count * sizeof(float), _vertices.ToArray(), BufferUsageHint.StaticDraw);
+        if (_vertices.Count > 0)
+        {
+            GL.BufferData(BufferTarget.ArrayBuffer, _vertices.Count * sizeof(float), _vertices.ToArray(), BufferUsageHint.StaticDraw);
         
-        // Position attribute (location 0)
-        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 0);
-        GL.EnableVertexAttribArray(0);
-        
-        // Texture coordinate attribute (location 1)
-        GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 9 * sizeof(float), 3 * sizeof(float));
-        GL.EnableVertexAttribArray(1);
-        
-        // Normal attribute (location 2)
-        GL.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 5 * sizeof(float));
-        GL.EnableVertexAttribArray(2);
-        
-        // Block type attribute (location 3)
-        GL.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, 9 * sizeof(float), 8 * sizeof(float));
-        GL.EnableVertexAttribArray(3);
+            // Position attribute (location 0)
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            
+            // Texture coordinate attribute (location 1)
+            GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 9 * sizeof(float), 3 * sizeof(float));
+            GL.EnableVertexAttribArray(1);
+            
+            // Normal attribute (location 2)
+            GL.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 5 * sizeof(float));
+            GL.EnableVertexAttribArray(2);
+            
+            // Block type attribute (location 3)
+            GL.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, 9 * sizeof(float), 8 * sizeof(float));
+            GL.EnableVertexAttribArray(3);
+        }
         
         _vertexCount = _vertices.Count / 9;
     }
 
+    public void MarkMeshForUpdate()
+    {
+        _meshNeedsUpdate = true;
+    }
+    
     public void Render()
     {
         if (_meshNeedsUpdate) UpdateMesh();
@@ -250,8 +297,20 @@ public class Chunk
 
     public void Dispose()
     {
-        GL.DeleteVertexArray(_vao);
-        GL.DeleteBuffer(_vbo);
+        if (_vao != 0)
+        {
+            GL.DeleteVertexArray(_vao);
+            _vao = 0;
+        }
+        
+        if (_vbo != 0)
+        {
+            GL.DeleteBuffer(_vbo);
+            _vbo = 0;
+        }
+        
+        _vertices?.Clear();
+        _blocks = null!;
     }
 }
 

@@ -8,6 +8,7 @@ namespace VoxelEngine.World
     public class GameWorld
     {
         public List<Chunk> Chunks = new();
+        private Vector3 _lastPlayerPosition = Vector3.Zero;
 
         public GameWorld()
         {
@@ -16,11 +17,12 @@ namespace VoxelEngine.World
 
         public void GenerateChunks()
         {
-            for (int cx = -1; cx <= 1; cx++)
+            // Render distance: 7x7 = 49 chunks
+            const int renderDistance = 3;
+            for (int cx = -renderDistance; cx <= renderDistance; cx++)
             {
-                for (int cz = -1; cz <= 1; cz++)
+                for (int cz = -renderDistance; cz <= renderDistance; cz++)
                 {
-                    // Chunk, chunk-koordinatlarında Vector2i bekliyor (dünya değil)
                     var chunk = new Chunk(new Vector2i(cx, cz));
                     Chunks.Add(chunk);
                 }
@@ -59,9 +61,9 @@ namespace VoxelEngine.World
             return chunk.GetBlock(localX, localY, localZ);
         }
 
-        public void Update(float deltaTime)
+        public void Update(float deltaTime, Vector3 playerPosition)
         {
-            // Boş — sonra eklenebilir (chunk yükleme/boşaltma vb.)
+            // Şimdilik basit - gelecekte dynamic chunk loading eklenecek
         }
 
         public void Render(Shader shader)
