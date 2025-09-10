@@ -38,9 +38,9 @@ in vec2 texCoord;
 
 out vec4 FragColor;
 
-uniform vec3 lightDir = vec3(0.5, -1.0, 0.3);
-uniform vec3 lightColor = vec3(1.0, 1.0, 1.0);
-uniform vec3 ambientLight = vec3(0.3, 0.3, 0.3);
+uniform vec3 lightDir;
+uniform vec3 lightColor;
+uniform vec3 ambientLight;
 
 void main()
 {

@@ -98,15 +98,16 @@ public class Chunk
         _meshNeedsUpdate = true;
     }
 
-    private void UpdateMesh()
-    {
-        if (!_meshNeedsUpdate) return;
+        private void UpdateMesh()
+        {
+            if (!_meshNeedsUpdate) return;
 
-        _vertices.Clear();
-        int solidBlocks = 0;
+            _vertices.Clear();
+            _vertices.Capacity = 10000; // Pre-allocate capacity to reduce allocations
+            int solidBlocks = 0;
 
-        // Hemen şimdi basit fix - tüm y seviyelerini tara ama optimize et
-        int maxY = 100; // Çoğu terrain bu seviyenin altında
+            // Y optimization - sadece terrain olan bölgeleri tara
+            int maxY = 80; // Daha da düşürdük terrain generation için
         
         for (int y = 0; y < maxY; y++)
         {

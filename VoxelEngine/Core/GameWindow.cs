@@ -64,9 +64,7 @@ namespace VoxelEngine.Core
             _player.Update((float)e.Time);
             _world.Update((float)e.Time, _player.Position);
 
-            GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-
-            _renderer.Render(_world);
+            _renderer.Render(_world, (float)e.Time);
 
             // FPS hesapla ve başlığa yaz
             _frameCounter++;
@@ -77,7 +75,8 @@ namespace VoxelEngine.Core
                 _frameCounter = 0;
                 _fpsTimer = 0.0;
                 string wireframeText = _wireframeMode ? " | Wireframe: ON" : "";
-                Title = $"Voxel Engine | FPS: {fps} | Chunks: {_world.Chunks.Count} | Mode: {_player.Mode} | Pos: {_player.Position.X:F1}, {_player.Position.Y:F1}, {_player.Position.Z:F1}{wireframeText}";
+                string pathTracingText = _renderer.PathTracingEnabled ? " | PathTracing: ON" : "";
+                Title = $"Voxel Engine | FPS: {fps} | Chunks: {_world.Chunks.Count()} | RenderDist: {_world.GetRenderDistance()} | Mode: {_player.Mode} | Pos: {_player.Position.X:F1}, {_player.Position.Y:F1}, {_player.Position.Z:F1}{wireframeText}{pathTracingText}";
             }
 
             SwapBuffers();
@@ -86,6 +85,13 @@ namespace VoxelEngine.Core
         protected override void OnUpdateFrame(FrameEventArgs e)
         {
             base.OnUpdateFrame(e);
+        }
+        
+        protected override void OnUnload()
+        {
+            _world?.Dispose();
+            _renderer?.Dispose();
+            base.OnUnload();
         }
 
         private void HandleInput(FrameEventArgs e)
@@ -146,6 +152,22 @@ namespace VoxelEngine.Core
                     GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
                     GL.Enable(EnableCap.CullFace);
                 }
+            }
+            
+            // Render distance controls
+            if (keyboardState.IsKeyPressed(Keys.F7)) // F7 = increase
+            {
+                _world.IncreaseRenderDistance();
+            }
+            if (keyboardState.IsKeyPressed(Keys.F6)) // F6 = decrease
+            {
+                _world.DecreaseRenderDistance();
+            }
+            
+            // Path tracing toggle
+            if (keyboardState.IsKeyPressed(Keys.F2))
+            {
+                _renderer.PathTracingEnabled = !_renderer.PathTracingEnabled;
             }
 
             // Basit mouse-look

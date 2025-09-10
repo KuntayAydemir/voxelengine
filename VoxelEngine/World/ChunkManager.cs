@@ -12,11 +12,17 @@ namespace VoxelEngine.World
         private readonly ConcurrentDictionary<Vector2i, Chunk> _chunks = new();
         private readonly ConcurrentQueue<Vector2i> _generationQueue = new();
         private readonly ConcurrentQueue<Chunk> _meshingQueue = new();
+        private readonly ConcurrentQueue<Vector2i> _unloadQueue = new();
         private readonly GameWorld _world;
         private readonly CancellationTokenSource _cancellationTokenSource = new();
         
         private Task? _generationTask;
         private Task? _meshingTask;
+        
+        // Configurable settings - performance optimized
+        public int RenderDistance { get; set; } = 6; // Başlangıç değeri düşürüldü: 13x13 chunks
+        public int UnloadDistance { get; set; } = 10; // Unload mesafesi render distance'dan büyük
+        public int MaxChunksPerFrame { get; set; } = 1; // Frame drop'ları azaltmak için
         
         public IEnumerable<Chunk> LoadedChunks => _chunks.Values;
         
@@ -36,6 +42,8 @@ namespace VoxelEngine.World
         {
             if (!_chunks.ContainsKey(position))
             {
+                // ConcurrentQueue'da Contains yok, basitçe duplicate request'lere izin ver
+                // Background thread'de duplicate check yapılacak
                 _generationQueue.Enqueue(position);
             }
         }
@@ -54,6 +62,10 @@ namespace VoxelEngine.World
                 {
                     try
                     {
+                        // Duplicate check - chunk zaten var mı?
+                        if (_chunks.ContainsKey(position))
+                            continue;
+                            
                         // Background thread'de sadece terrain generate et, OpenGL yok
                         var chunk = CreateChunkData(position);
                         _chunks[position] = chunk;
@@ -68,7 +80,7 @@ namespace VoxelEngine.World
                 }
                 else
                 {
-                    await Task.Delay(16, _cancellationTokenSource.Token); // ~60 FPS check
+                    await Task.Delay(50, _cancellationTokenSource.Token); // Daha az aggressive - frame drop'ları azalt
                 }
             }
         }
@@ -91,9 +103,9 @@ namespace VoxelEngine.World
         
         public void ProcessMeshingQueue()
         {
-            // Main thread'de çağırılacak
+            // Main thread'de çağırılacak - GPU workload'ı kontrol et
             int processed = 0;
-            while (_meshingQueue.TryDequeue(out var chunk) && processed < 2) // Frame başına max 2 chunk
+            while (_meshingQueue.TryDequeue(out var chunk) && processed < MaxChunksPerFrame)
             {
                 chunk.MarkMeshForUpdate();
                 processed++;
@@ -102,27 +114,85 @@ namespace VoxelEngine.World
         
         public void UpdateNearPlayer(Vector3 playerPosition)
         {
-            int playerChunkX = (int)Math.Floor(playerPosition.X / 16);
-            int playerChunkZ = (int)Math.Floor(playerPosition.Z / 16);
+            int playerChunkX = (int)Math.Floor(playerPosition.X / Chunk.ChunkSize);
+            int playerChunkZ = (int)Math.Floor(playerPosition.Z / Chunk.ChunkSize);
             
-            const int renderDistance = 3;
-            
-            for (int x = -renderDistance; x <= renderDistance; x++)
+            // Circular loading pattern - daha doğal görünüm
+            for (int x = -RenderDistance; x <= RenderDistance; x++)
             {
-                for (int z = -renderDistance; z <= renderDistance; z++)
+                for (int z = -RenderDistance; z <= RenderDistance; z++)
                 {
-                    var chunkPos = new Vector2i(playerChunkX + x, playerChunkZ + z);
-                    RequestChunk(chunkPos);
+                    // Circular distance check
+                    float distance = (float)Math.Sqrt(x * x + z * z);
+                    if (distance <= RenderDistance)
+                    {
+                        var chunkPos = new Vector2i(playerChunkX + x, playerChunkZ + z);
+                        RequestChunk(chunkPos);
+                    }
+                }
+            }
+        }
+        
+        public void UnloadDistantChunks(Vector3 playerPosition)
+        {
+            int playerChunkX = (int)Math.Floor(playerPosition.X / Chunk.ChunkSize);
+            int playerChunkZ = (int)Math.Floor(playerPosition.Z / Chunk.ChunkSize);
+            
+            var chunksToUnload = new List<Vector2i>();
+            
+            foreach (var kvp in _chunks)
+            {
+                var chunkPos = kvp.Key;
+                float distance = Vector2.Distance(
+                    new Vector2(chunkPos.X, chunkPos.Y),
+                    new Vector2(playerChunkX, playerChunkZ));
+                
+                if (distance > UnloadDistance)
+                {
+                    chunksToUnload.Add(chunkPos);
+                }
+            }
+            
+            // Unload chunks
+            foreach (var chunkPos in chunksToUnload)
+            {
+                if (_chunks.TryRemove(chunkPos, out var chunk))
+                {
+                    chunk?.Dispose();
                 }
             }
         }
         
         public void Dispose()
         {
-            _cancellationTokenSource.Cancel();
-            _generationTask?.Wait(1000);
-            _meshingTask?.Wait(1000);
-            _cancellationTokenSource.Dispose();
+            try
+            {
+                _cancellationTokenSource.Cancel();
+                
+                // Try to wait for tasks to complete gracefully
+                try
+                {
+                    _generationTask?.Wait(100); // Short timeout
+                }
+                catch (AggregateException) { } // Ignore cancellation exceptions
+                
+                try
+                {
+                    _meshingTask?.Wait(100); // Short timeout
+                }
+                catch (AggregateException) { } // Ignore cancellation exceptions
+            }
+            finally
+            {
+                _cancellationTokenSource.Dispose();
+                
+                // Clean up remaining chunks
+                foreach (var chunk in _chunks.Values)
+                {
+                    chunk?.Dispose();
+                }
+                _chunks.Clear();
+            }
         }
     }
 }

@@ -9,8 +9,8 @@ namespace VoxelEngine.Core
         public Vector3 Up = Vector3.UnitY;
         public Vector3 Right => Vector3.Normalize(Vector3.Cross(Front, Up));
 
-        private float _yaw = -90.0f; // looking along -Z
-        private float _pitch = 0.0f;
+        public float _yaw = -90.0f; // looking along -Z
+        public float _pitch = 0.0f;
 
         public void YawPitch(float yawDelta, float pitchDelta)
         {

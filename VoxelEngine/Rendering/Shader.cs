@@ -51,5 +51,22 @@ namespace VoxelEngine.Rendering
             int location = GL.GetUniformLocation(_handle, name);
             GL.UniformMatrix4(location, false, ref matrix);
         }
+        
+        public void SetVector3(string name, Vector3 value)
+        {
+            int location = GL.GetUniformLocation(_handle, name);
+            GL.Uniform3(location, value.X, value.Y, value.Z);
+        }
+        
+        public void SetFloat(string name, float value)
+        {
+            int location = GL.GetUniformLocation(_handle, name);
+            GL.Uniform1(location, value);
+        }
+        
+        public void Dispose()
+        {
+            GL.DeleteProgram(_handle);
+        }
     }
 }
