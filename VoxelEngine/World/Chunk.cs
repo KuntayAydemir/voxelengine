@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using VoxelEngine.Rendering;
@@ -7,49 +9,74 @@ namespace VoxelEngine.World;
 public class Chunk
 {
     public const int ChunkSize = 16;
-    public const int ChunkHeight = 128;
+    public const int ChunkHeight = 256;
+    
+    // Chunk koordinatı (dünya koordinatı değil)
+    public Vector2i Position { get; private set; }
+    private BlockType[,,] _blocks;
+    private int _vao, _vbo;
+    private int _vertexCount;
+    private bool _meshNeedsUpdate = true;
+    private List<float> _vertices = new List<float>();
 
-    private readonly BlockType[,,] _blocks = new BlockType[ChunkSize, ChunkHeight, ChunkSize];
-    public Vector3 Position;
-
-    private int _vao;
-    private int _vbo;
-    private int _ebo;
-    private int _indexCount;
-
-    public Chunk(Vector3 position)
+    public Chunk(Vector2i position)
     {
         Position = position;
-        GenerateFlat();
-        GenerateMesh();
+        _blocks = new BlockType[ChunkSize, ChunkHeight, ChunkSize];
+        
+        // Generate OpenGL buffers
+        _vao = GL.GenVertexArray();
+        _vbo = GL.GenBuffer();
+        
+        GenerateTerrain();
     }
 
-    private void GenerateFlat()
+    public BlockType GetBlock(int x, int y, int z)
     {
+        if (x < 0 || x >= ChunkSize || y < 0 || y >= ChunkHeight || z < 0 || z >= ChunkSize)
+            return BlockType.Air;
+        
+        return _blocks[x, y, z];
+    }
+
+    public void SetBlock(int x, int y, int z, BlockType blockType)
+    {
+        if (x < 0 || x >= ChunkSize || y < 0 || y >= ChunkHeight || z < 0 || z >= ChunkSize)
+            return;
+        
+        _blocks[x, y, z] = blockType;
+        _meshNeedsUpdate = true;
+    }
+
+    private void GenerateTerrain()
+    {
+        // Düz dünya jenerasyonu - basit düz zemin
+        const int groundLevel = 50;
+        
         for (int x = 0; x < ChunkSize; x++)
         {
             for (int z = 0; z < ChunkSize; z++)
             {
-                for (int y = 0; y < ChunkHeight; y++)
+                for (int y = 0; y <= groundLevel && y < ChunkHeight; y++)
                 {
-                    if (y < 10)
+                    if (y < groundLevel - 5)
                         _blocks[x, y, z] = BlockType.Stone;
-                    else if (y < 12)
+                    else if (y < groundLevel)
                         _blocks[x, y, z] = BlockType.Dirt;
-                    else if (y == 12)
+                    else if (y == groundLevel)
                         _blocks[x, y, z] = BlockType.Grass;
-                    else
-                        _blocks[x, y, z] = BlockType.Air;
+                    // y > groundLevel = Air (default)
                 }
             }
         }
+        _meshNeedsUpdate = true;
     }
 
-    private void GenerateMesh()
+    public void UpdateMesh()
     {
-        var vertices = new List<float>();
-        var indices = new List<uint>();
-        uint indexOffset = 0;
+        if (!_meshNeedsUpdate) return;
+
+        _vertices.Clear();
 
         for (int x = 0; x < ChunkSize; x++)
         {
@@ -57,92 +84,186 @@ public class Chunk
             {
                 for (int z = 0; z < ChunkSize; z++)
                 {
-                    if (_blocks[x, y, z] == BlockType.Air) continue;
+                    BlockType block = _blocks[x, y, z];
+                    if (block == BlockType.Air) continue;
 
-                    AddCube(vertices, indices, x, y, z, (float)_blocks[x, y, z], ref indexOffset);
+                    Vector3 worldPos = new Vector3(
+                        Position.X * ChunkSize + x,
+                        y,
+                        Position.Y * ChunkSize + z
+                    );
+
+                    // Check each face and add if not occluded
+                    AddFaceIfVisible(worldPos, block, x, y, z, Direction.Front);
+                    AddFaceIfVisible(worldPos, block, x, y, z, Direction.Back);
+                    AddFaceIfVisible(worldPos, block, x, y, z, Direction.Left);
+                    AddFaceIfVisible(worldPos, block, x, y, z, Direction.Right);
+                    AddFaceIfVisible(worldPos, block, x, y, z, Direction.Top);
+                    AddFaceIfVisible(worldPos, block, x, y, z, Direction.Bottom);
                 }
             }
         }
 
-        _vao = GL.GenVertexArray();
-        _vbo = GL.GenBuffer();
-        _ebo = GL.GenBuffer();
-
-        GL.BindVertexArray(_vao);
-
-        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        GL.BufferData(BufferTarget.ArrayBuffer, vertices.Count * sizeof(float), vertices.ToArray(), BufferUsageHint.StaticDraw);
-
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
-        GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Count * sizeof(uint), indices.ToArray(), BufferUsageHint.StaticDraw);
-
-        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 4 * sizeof(float), 0);
-        GL.EnableVertexAttribArray(0);
-
-        GL.VertexAttribPointer(1, 1, VertexAttribPointerType.Float, false, 4 * sizeof(float), 3 * sizeof(float));
-        GL.EnableVertexAttribArray(1);
-
-        _indexCount = indices.Count;
+        UpdateBuffers();
+        _meshNeedsUpdate = false;
     }
 
-    private void AddCube(List<float> vertices, List<uint> indices, int x, int y, int z, float blockType, ref uint indexOffset)
+    private void AddFaceIfVisible(Vector3 worldPos, BlockType block, int x, int y, int z, Direction direction)
     {
-        var corners = new Vector3[]
+        Vector3i neighborPos = GetNeighborPosition(x, y, z, direction);
+        BlockType neighbor = GetBlock(neighborPos.X, neighborPos.Y, neighborPos.Z);
+
+        if (!BlockProperties.IsTransparent(neighbor)) return;
+
+        AddFaceVertices(worldPos, direction, block);
+    }
+
+    private Vector3i GetNeighborPosition(int x, int y, int z, Direction direction)
+    {
+        return direction switch
         {
-            new(x,     y,     z),     // 0
-            new(x + 1, y,     z),     // 1
-            new(x + 1, y + 1, z),     // 2
-            new(x,     y + 1, z),     // 3
-            new(x,     y,     z + 1), // 4
-            new(x + 1, y,     z + 1), // 5
-            new(x + 1, y + 1, z + 1), // 6
-            new(x,     y + 1, z + 1)  // 7
+            Direction.Front => new Vector3i(x, y, z + 1),
+            Direction.Back => new Vector3i(x, y, z - 1),
+            Direction.Left => new Vector3i(x - 1, y, z),
+            Direction.Right => new Vector3i(x + 1, y, z),
+            Direction.Top => new Vector3i(x, y + 1, z),
+            Direction.Bottom => new Vector3i(x, y - 1, z),
+            _ => new Vector3i(x, y, z)
         };
+    }
 
-        foreach (var corner in corners)
-        {
-            vertices.Add(corner.X);
-            vertices.Add(corner.Y);
-            vertices.Add(corner.Z);
-            vertices.Add(blockType);
-        }
+    private void AddFaceVertices(Vector3 pos, Direction direction, BlockType blockType)
+    {
+        Vector3[] faceVertices = GetFaceVertices(pos, direction);
+        Vector3 normal = GetFaceNormal(direction);
+        float blockTypeFloat = (float)blockType;
+        
+        // First triangle (pos, texCoord, normal, blockType)
+        _vertices.AddRange(new float[] { faceVertices[0].X, faceVertices[0].Y, faceVertices[0].Z, 0, 0, normal.X, normal.Y, normal.Z, blockTypeFloat });
+        _vertices.AddRange(new float[] { faceVertices[1].X, faceVertices[1].Y, faceVertices[1].Z, 1, 0, normal.X, normal.Y, normal.Z, blockTypeFloat });
+        _vertices.AddRange(new float[] { faceVertices[2].X, faceVertices[2].Y, faceVertices[2].Z, 1, 1, normal.X, normal.Y, normal.Z, blockTypeFloat });
+        
+        // Second triangle
+        _vertices.AddRange(new float[] { faceVertices[0].X, faceVertices[0].Y, faceVertices[0].Z, 0, 0, normal.X, normal.Y, normal.Z, blockTypeFloat });
+        _vertices.AddRange(new float[] { faceVertices[2].X, faceVertices[2].Y, faceVertices[2].Z, 1, 1, normal.X, normal.Y, normal.Z, blockTypeFloat });
+        _vertices.AddRange(new float[] { faceVertices[3].X, faceVertices[3].Y, faceVertices[3].Z, 0, 1, normal.X, normal.Y, normal.Z, blockTypeFloat });
+    }
 
-        var faces = new uint[][]
+    private Vector3[] GetFaceVertices(Vector3 pos, Direction direction)
+    {
+        return direction switch
         {
-            new uint[] {0, 1, 2, 2, 3, 0},
-            new uint[] {1, 5, 6, 6, 2, 1},
-            new uint[] {5, 4, 7, 7, 6, 5},
-            new uint[] {4, 0, 3, 3, 7, 4},
-            new uint[] {3, 2, 6, 6, 7, 3},
-            new uint[] {4, 5, 1, 1, 0, 4}
-        };
-
-        foreach (var face in faces)
-        {
-            foreach (var index in face)
+            Direction.Front => new[]
             {
-                indices.Add(index + indexOffset);
-            }
-        }
-
-        indexOffset += 8;
+                pos + new Vector3(0, 0, 1),
+                pos + new Vector3(1, 0, 1),
+                pos + new Vector3(1, 1, 1),
+                pos + new Vector3(0, 1, 1)
+            },
+            Direction.Back => new[]
+            {
+                pos + new Vector3(1, 0, 0),
+                pos + new Vector3(0, 0, 0),
+                pos + new Vector3(0, 1, 0),
+                pos + new Vector3(1, 1, 0)
+            },
+            Direction.Left => new[]
+            {
+                pos + new Vector3(0, 0, 0),
+                pos + new Vector3(0, 0, 1),
+                pos + new Vector3(0, 1, 1),
+                pos + new Vector3(0, 1, 0)
+            },
+            Direction.Right => new[]
+            {
+                pos + new Vector3(1, 0, 1),
+                pos + new Vector3(1, 0, 0),
+                pos + new Vector3(1, 1, 0),
+                pos + new Vector3(1, 1, 1)
+            },
+            Direction.Top => new[]
+            {
+                pos + new Vector3(0, 1, 1),
+                pos + new Vector3(1, 1, 1),
+                pos + new Vector3(1, 1, 0),
+                pos + new Vector3(0, 1, 0)
+            },
+            Direction.Bottom => new[]
+            {
+                pos + new Vector3(0, 0, 0),
+                pos + new Vector3(1, 0, 0),
+                pos + new Vector3(1, 0, 1),
+                pos + new Vector3(0, 0, 1)
+            },
+            _ => new Vector3[4]
+        };
     }
 
-    public BlockType GetBlock(int x, int y, int z)
+    private Vector3 GetFaceNormal(Direction direction)
     {
-        if (x < 0 || x >= ChunkSize || y < 0 || y >= ChunkHeight || z < 0 || z >= ChunkSize)
-            return BlockType.Air;
-        return _blocks[x, y, z];
+        return direction switch
+        {
+            Direction.Front => new Vector3(0, 0, 1),
+            Direction.Back => new Vector3(0, 0, -1),
+            Direction.Left => new Vector3(-1, 0, 0),
+            Direction.Right => new Vector3(1, 0, 0),
+            Direction.Top => new Vector3(0, 1, 0),
+            Direction.Bottom => new Vector3(0, -1, 0),
+            _ => Vector3.Zero
+        };
     }
 
-    public void Render(Shader shader)
+    private void UpdateBuffers()
     {
-        if (_indexCount == 0) return;
-
-        Matrix4 model = Matrix4.CreateTranslation(Position);
-        shader.SetMatrix4("model", model);
-
         GL.BindVertexArray(_vao);
-        GL.DrawElements(PrimitiveType.Triangles, _indexCount, DrawElementsType.UnsignedInt, 0);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+        
+        // Vertex format: position(3) + texCoord(2) + normal(3) + blockType(1) = 9 floats per vertex
+        GL.BufferData(BufferTarget.ArrayBuffer, _vertices.Count * sizeof(float), _vertices.ToArray(), BufferUsageHint.StaticDraw);
+        
+        // Position attribute (location 0)
+        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 0);
+        GL.EnableVertexAttribArray(0);
+        
+        // Texture coordinate attribute (location 1)
+        GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 9 * sizeof(float), 3 * sizeof(float));
+        GL.EnableVertexAttribArray(1);
+        
+        // Normal attribute (location 2)
+        GL.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 5 * sizeof(float));
+        GL.EnableVertexAttribArray(2);
+        
+        // Block type attribute (location 3)
+        GL.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, 9 * sizeof(float), 8 * sizeof(float));
+        GL.EnableVertexAttribArray(3);
+        
+        _vertexCount = _vertices.Count / 9;
     }
+
+    public void Render()
+    {
+        if (_meshNeedsUpdate) UpdateMesh();
+        
+        GL.BindVertexArray(_vao);
+        GL.DrawArrays(PrimitiveType.Triangles, 0, _vertexCount);
+    }
+
+    public void Dispose()
+    {
+        GL.DeleteVertexArray(_vao);
+        GL.DeleteBuffer(_vbo);
+    }
+}
+
+public static class BlockProperties
+{
+    public static bool IsTransparent(BlockType type)
+    {
+        return type == BlockType.Air;
+    }
+}
+
+public enum Direction
+{
+    Front, Back, Left, Right, Top, Bottom
 }

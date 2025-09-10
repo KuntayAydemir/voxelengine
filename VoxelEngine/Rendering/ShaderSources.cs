@@ -6,7 +6,9 @@ public static class ShaderSources
 #version 330 core
 
 layout (location = 0) in vec3 aPosition;
-layout (location = 1) in float aBlockType;
+layout (location = 1) in vec2 aTexCoord;
+layout (location = 2) in vec3 aNormal;
+layout (location = 3) in float aBlockType;
 
 uniform mat4 model;
 uniform mat4 view;
@@ -14,11 +16,13 @@ uniform mat4 projection;
 
 out float blockType;
 out vec3 worldPos;
+out vec3 normal;
 
 void main()
 {
     worldPos = vec3(model * vec4(aPosition, 1.0));
     blockType = aBlockType;
+    normal = mat3(transpose(inverse(model))) * aNormal;
     gl_Position = projection * view * vec4(worldPos, 1.0);
 }";
 
@@ -27,6 +31,7 @@ void main()
 
 in float blockType;
 in vec3 worldPos;
+in vec3 normal;
 
 out vec4 FragColor;
 
@@ -46,8 +51,8 @@ void main()
     else if (blockTypeInt == 5) color = vec3(0.1, 0.6, 0.1);  // Leaves
     else color = vec3(0.7, 0.7, 0.7);  // Default
 
-    vec3 normal = normalize(vec3(0.0, 1.0, 0.0));
-    float diffuse = max(dot(normal, -normalize(lightDir)), 0.0);
+    vec3 lightNormal = normalize(normal);
+    float diffuse = max(dot(lightNormal, -normalize(lightDir)), 0.0);
     vec3 finalColor = color * (ambientLight + lightColor * diffuse);
 
     FragColor = vec4(finalColor, 1.0);

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using OpenTK.Mathematics;
 using VoxelEngine.Rendering;
@@ -15,30 +16,40 @@ namespace VoxelEngine.World
 
         public void GenerateChunks()
         {
-            for (int x = -1; x <= 1; x++)
+            for (int cx = -1; cx <= 1; cx++)
             {
-                for (int z = -1; z <= 1; z++)
+                for (int cz = -1; cz <= 1; cz++)
                 {
-                    var chunk = new Chunk(new Vector3(x * 16, 0, z * 16));
+                    // Chunk, chunk-koordinatlarında Vector2i bekliyor (dünya değil)
+                    var chunk = new Chunk(new Vector2i(cx, cz));
                     Chunks.Add(chunk);
                 }
             }
         }
 
+        private static int FloorDiv(int a, int b) => (int)Math.Floor((double)a / b);
+        private static int ModFloor(int a, int m)
+        {
+            int r = a % m;
+            return r < 0 ? r + m : r;
+        }
+
         public BlockType GetBlock(Vector3 position)
         {
-            int chunkX = (int)Math.Floor(position.X / 16);
-            int chunkZ = (int)Math.Floor(position.Z / 16);
+            // Dünya koordinatlarını tamsayıya indir
+            int wx = (int)Math.Floor(position.X);
+            int wy = (int)Math.Floor(position.Y);
+            int wz = (int)Math.Floor(position.Z);
 
-            var chunk = Chunks.Find(c =>
-                c.Position.X == chunkX * 16 &&
-                c.Position.Z == chunkZ * 16);
+            int chunkX = FloorDiv(wx, Chunk.ChunkSize);
+            int chunkZ = FloorDiv(wz, Chunk.ChunkSize);
 
+            var chunk = Chunks.Find(c => c.Position.X == chunkX && c.Position.Y == chunkZ);
             if (chunk == null) return BlockType.Air;
 
-            int localX = (int)(position.X - chunk.Position.X);
-            int localY = (int)position.Y;
-            int localZ = (int)(position.Z - chunk.Position.Z);
+            int localX = ModFloor(wx, Chunk.ChunkSize);
+            int localY = wy;
+            int localZ = ModFloor(wz, Chunk.ChunkSize);
 
             if (localX < 0 || localX >= Chunk.ChunkSize ||
                 localY < 0 || localY >= Chunk.ChunkHeight ||
@@ -50,14 +61,15 @@ namespace VoxelEngine.World
 
         public void Update(float deltaTime)
         {
-            // Boş — sonra eklenebilir
+            // Boş — sonra eklenebilir (chunk yükleme/boşaltma vb.)
         }
 
         public void Render(Shader shader)
         {
             foreach (var chunk in Chunks)
             {
-                chunk.Render(shader);
+                // Shader zaten aktif — chunk kendi VAO/VBO'sunu çizer
+                chunk.Render();
             }
         }
     }

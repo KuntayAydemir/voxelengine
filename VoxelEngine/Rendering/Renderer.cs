@@ -23,13 +23,17 @@ namespace VoxelEngine.Rendering
 
             _shader.Use();
 
+            Matrix4 model = Matrix4.Identity;
             Matrix4 view = _camera.GetViewMatrix();
             Matrix4 projection = _camera.GetProjectionMatrix();
 
+            _shader.SetMatrix4("model", model);
             _shader.SetMatrix4("view", view);
             _shader.SetMatrix4("projection", projection);
 
             world.Render(_shader);
+
+            // Basit debug metni (chunk sayısı, FPS) için gelecekte bir UI katmanı ekleyeceğiz
         }
     }
 }

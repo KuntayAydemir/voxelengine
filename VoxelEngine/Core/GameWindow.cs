@@ -16,6 +16,9 @@ namespace VoxelEngine.Core
         private Renderer _renderer = null!;
         private Camera _camera = null!;
 
+        private double _fpsTimer = 0.0;
+        private int _frameCounter = 0;
+
         public GameWindow() : base(
             GameWindowSettings.Default,
             new NativeWindowSettings()
@@ -38,6 +41,9 @@ namespace VoxelEngine.Core
             _world = new GameWorld();
             _player = new PlayerPhysics(_world);
             _renderer = new Renderer(_camera);
+            
+            // Kamera ve oyuncu pozisyonlarını senkronize et
+            _camera.Position = _player.Position;
 
             CursorState = CursorState.Grabbed;
         }
@@ -55,6 +61,17 @@ namespace VoxelEngine.Core
 
             _renderer.Render(_world);
 
+            // FPS hesapla ve başlığa yaz
+            _frameCounter++;
+            _fpsTimer += e.Time;
+            if (_fpsTimer >= 1.0)
+            {
+                int fps = _frameCounter;
+                _frameCounter = 0;
+                _fpsTimer = 0.0;
+                Title = $"Voxel Engine | FPS: {fps} | Chunks: {_world.Chunks.Count} | Mode: {_player.Mode} | Pos: {_player.Position.X:F1}, {_player.Position.Y:F1}, {_player.Position.Z:F1}";
+            }
+
             SwapBuffers();
         }
 
@@ -66,20 +83,55 @@ namespace VoxelEngine.Core
         private void HandleInput(FrameEventArgs e)
         {
             var keyboardState = KeyboardState;
+            var mouseState = MouseState;
 
             if (keyboardState.IsKeyDown(Keys.Escape))
                 Close();
 
-            float speed = 5.0f * (float)e.Time;
+            float speed = 15.0f; // deltaTime PlayerPhysics'te uygulanacak
 
+            Vector3 moveDir = Vector3.Zero;
             if (keyboardState.IsKeyDown(Keys.W))
-                _camera.Position += _camera.Front * speed;
+                moveDir += _camera.Front;
             if (keyboardState.IsKeyDown(Keys.S))
-                _camera.Position -= _camera.Front * speed;
+                moveDir -= _camera.Front;
             if (keyboardState.IsKeyDown(Keys.A))
-                _camera.Position -= _camera.Right * speed;
+                moveDir -= _camera.Right;
             if (keyboardState.IsKeyDown(Keys.D))
-                _camera.Position += _camera.Right * speed;
+                moveDir += _camera.Right;
+            moveDir.Y = 0; // yatay düzlemde
+            if (moveDir.LengthSquared > 0)
+                moveDir = Vector3.Normalize(moveDir) * speed;
+
+            // God mod yükselme/alçalma
+            if (_player.Mode == PlayerMode.God)
+            {
+                if (keyboardState.IsKeyDown(Keys.Space)) moveDir.Y += speed;
+                if (keyboardState.IsKeyDown(Keys.LeftShift)) moveDir.Y -= speed;
+            }
+            else
+            {
+                // Normal modda zıplama
+                if (keyboardState.IsKeyPressed(Keys.Space)) _player.Jump();
+            }
+
+            _player.ApplyMovement(moveDir, (float)e.Time);
+            _camera.Position = _player.Position;
+
+            // Mod toggle
+            if (keyboardState.IsKeyPressed(Keys.F10))
+            {
+                _player.ToggleMode();
+            }
+
+            // Basit mouse-look
+            const float sensitivity = 0.1f;
+            var delta = mouseState.Delta; // px/frame
+
+            if (CursorState == CursorState.Grabbed)
+            {
+                _camera.YawPitch(delta.X * sensitivity, -delta.Y * sensitivity);
             }
         }
     }
+}
